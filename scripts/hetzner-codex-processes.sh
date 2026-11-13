@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Read-only report for Hetzner Managed Server process whitelist requests.
+# Report for Hetzner Managed Server process whitelist requests.
+# --setup additionally installs Codex CLI and, when available, its VS Code extension.
 set -u
 
 report_user="$(id -un)"
@@ -11,9 +12,61 @@ if [[ -z "$report_home" ]]; then
   exit 1
 fi
 
+case "${1:-}" in
+  '') ;;
+  --setup)
+    printf '=== Codex-Einrichtung ===\n'
+    if type -P codex >/dev/null 2>&1 || [[ -x "$report_home/.local/bin/codex" ]]; then
+      printf 'Codex CLI ist bereits installiert.\n'
+    elif ! command -v curl >/dev/null 2>&1; then
+      printf 'Codex CLI konnte nicht installiert werden: curl fehlt.\n' >&2
+    else
+      report_installer="$(mktemp)" || exit 1
+      if curl -fsSL --connect-timeout 10 --max-time 180 \
+          'https://chatgpt.com/codex/install.sh' -o "$report_installer"; then
+        printf 'Installiere Codex CLI für diesen Benutzer ...\n'
+        if ! CODEX_INSTALL_DIR="$report_home/.local/bin" sh "$report_installer"; then
+          printf 'Codex-Installation fehlgeschlagen.\n' >&2
+        fi
+      else
+        printf 'Codex-Installer konnte nicht geladen werden.\n' >&2
+      fi
+      rm -f -- "$report_installer"
+    fi
+
+    if command -v code >/dev/null 2>&1; then
+      if code --list-extensions 2>/dev/null | grep -Fxqi 'openai.chatgpt'; then
+        printf 'Codex VS-Code-Erweiterung ist bereits installiert.\n'
+      else
+        printf 'Installiere die Codex-Erweiterung auf dem Remote-Host ...\n'
+        if ! code --install-extension openai.chatgpt; then
+          printf 'Installation der Remote-Erweiterung fehlgeschlagen.\n' >&2
+        fi
+      fi
+    else
+      printf 'VS Code Server: Erst mit VS Code Remote-SSH verbinden.\n'
+      printf 'Dann --setup im Remote-Terminal erneut ausführen.\n'
+    fi
+    printf '\n'
+    ;;
+  -h|--help)
+    printf 'Aufruf: bash %s [--setup]\n' "${0##*/}"
+    printf 'Ohne Parameter: nur erkennen und Tickettext ausgeben.\n'
+    printf 'Mit --setup: Codex CLI und, falls möglich, Remote-Erweiterung installieren.\n'
+    exit 0
+    ;;
+  *)
+    printf 'Unbekannter Parameter: %s (siehe --help)\n' "$1" >&2
+    exit 2
+    ;;
+esac
+
 # The separately installed CLI may be a symlink. Its real executable can
 # differ from the path used to start it.
 report_cli="$(type -P codex 2>/dev/null || true)"
+if [[ -z "$report_cli" && -x "$report_home/.local/bin/codex" ]]; then
+  report_cli="$report_home/.local/bin/codex"
+fi
 report_cli_real=""
 if [[ -n "$report_cli" ]] && command -v readlink >/dev/null 2>&1; then
   report_cli_real="$(readlink -f -- "$report_cli" 2>/dev/null || true)"
